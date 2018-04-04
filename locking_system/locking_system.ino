@@ -26,6 +26,8 @@
 #include <dmx.h>
 #include <power_mgt.h>
 
+#include <Ethernet.h>
+
 //******************************************************************************************
 //******************************************************************************************
 // SmartThings Library for Arduino Ethernet W5100 Shield
@@ -63,7 +65,7 @@
 //W5100 Ethernet Shield Information ce:4d:c6:02:47:4b
 //******************************************************************************************
 
-byte mac[] = {0x06, 0x4d, 0xc6, 0x02, 0x47, 0x4b}; //MAC address, leave first octet 0x06, change others to be unique //  <---You must edit this line!
+byte mac[] = {0x06, 0x4d, 0xc6, 0x02, 0x47, 0xbb}; //MAC address, leave first octet 0x06, change others to be unique //  <---You must edit this line!
 IPAddress ip(192, 168, 1, 133);               //Arduino device IP Address                   //  <---You must edit this line!
 IPAddress gateway(192, 168, 1, 1);            //router gateway                              //  <---You must edit this line!
 IPAddress subnet(255, 255, 255, 0);           //LAN sceubnet mask                             //  <---You must edit this line!
@@ -73,6 +75,11 @@ const unsigned int serverPort = 8090;         // port to run the http server on
 /// Smartthings hub information
 IPAddress hubIp(192, 168, 1, 51);            // smartthings hub ip                         //  <---You must edit this line!
 const unsigned int hubPort = 39500;           // smartthings hub port
+
+
+#define EVENTGHOST_HTPC = 192.168.1.12
+EthernetClient client;
+
 
 
 /* 
