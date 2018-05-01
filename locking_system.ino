@@ -39,10 +39,15 @@
 #include <Device.h>          //Generic Device Class, inherited by Sensor and Executor classes
 #include <Executor.h>        //Generic Executor Class, typically receives data from ST Cloud (e.g. Switch)
 #include <Everything.h>      //Master Brain of ST_Anything library that ties everything together and performs ST Shield communications
+#include <Sensor.h>          //Generic Sensor Class, typically provides data to ST Cloud (e.g. Temperature, Motion, etc...)
+#include <InterruptSensor.h> //Generic Interrupt "Sensor" Class, waits for change of state on digital input 
+#include <PollingSensor.h>   //Generic Polling "Sensor" Class, polls Arduino pins periodically
+
 
 //Implements an Interrupt Sensor (IS) and Executor to monitor the status of a digital input pin and control a digital output pin
 //#include <IS_Button.h>       //Implements an Interrupt Sensor (IS) to monitor the status of a digital input pin for button presses
 #include <EX_Switch.h>       //Implements an Executor (EX) via a digital output to a relay
+#include <IS_Contact.h>      //Implements an Interrupt Sensor (IS) to monitor the status of a digital input pin
 
 //"RESERVED" pins for W5100 Ethernet Shield - best to avoid
 #define PIN_4_RESERVED            4   //reserved by W5100 Shield on both UNO and MEGA
@@ -57,14 +62,14 @@
 
 #define PIN_SWITCH_1              A1  //SmartThings Capability "Switch"
 #define PIN_SWITCH_2              A2  //SmartThings Capability "Switch"
-
+#define PIN_CONTACT_1             23  //SmartThings Capability "Contact Sensor"
 
 //******************************************************************************************
 //W5100 Ethernet Shield Information ce:4d:c6:02:47:4b
 //******************************************************************************************
 
-byte mac[] = {0x06, 0x4d, 0xc6, 0x02, 0x47, 0x4b}; //MAC address, leave first octet 0x06, change others to be unique //  <---You must edit this line!
-IPAddress ip(192, 168, 1, 133);               //Arduino device IP Address                   //  <---You must edit this line!
+byte mac[] = {0x06, 0x7d, 0xd6, 0x02, 0x47, 0x7b}; //MAC address, leave first octet 0x06, change others to be unique //  <---You must edit this line!
+IPAddress ip(192, 168, 1, 161);               //Arduino device IP Address                   //  <---You must edit this line!
 IPAddress gateway(192, 168, 1, 1);            //router gateway                              //  <---You must edit this line!
 IPAddress subnet(255, 255, 255, 0);           //LAN sceubnet mask                             //  <---You must edit this line!
 IPAddress dnsserver(192, 168, 1, 1);          //DNS server                                  //  <---You must edit this line!
@@ -104,10 +109,13 @@ const unsigned int hubPort = 39500;           // smartthings hub port
 #define UNLOCKED_TIME 10000
 
 
+#define POLLING_MAX 200
 
 //indicates the last door state only sends eventys when it changes
 // 0 closed 1 open matches highpull of reading mag contact switch
 int lastDoorState = 0;
+int pollingCount = 0;
+
 
 
 int pinLEDS[] = {
@@ -132,6 +140,7 @@ int sensorStates[] = {
 
 int lastState = 0;
 int lastBookState = 0;
+
 
 int failedAttempts = 0;
 
@@ -192,7 +201,7 @@ int findNextSlot(int pressed[] ) {
         //Violet
       }
     FastLED.show();
-    } else if (success = 2) {
+    } else if (success == 2) {
       flashLEDS(CHSV(221, 240, 254), 2);
     }
     else if(success == 3){
@@ -234,13 +243,19 @@ int findNextSlot(int pressed[] ) {
     int sensorState = 0;
      
     sensorState = digitalRead(orderedSensorPins[j]);
-    leds[j] = CHSV(122, 230, 255); //blue
     
-//    if (sensorState == LOW  && color == 1){
-//      //Blue
-//      leds[j] = CHSV(122, 230, 255);
-//      
-//    }
+    
+    if (sensorState == LOW  && color == 1 && lockdownMode == 0){
+      if (simpleMode == 1) {
+        leds[j] = CHSV(175, 250, 240); //green
+      } else {
+      //Blue
+      leds[j] = CHSV(122, 230, 255); //blue
+      }
+      
+    } else {
+      leds[j] = CHSV(255, 0, 0);
+    }
 //    else if (sensorState == LOW && color == 2){
 //      //Green
 //      leds[j] = CHSV(175, 250, 240);
@@ -257,9 +272,7 @@ int findNextSlot(int pressed[] ) {
 //      //Violet
 //      leds[j] = CHSV(79, 248, 250);
 //    }
-//    else {
-//      leds[j] = CHSV(255, 0, 0);
-//    }
+    
   }
     
   FastLED.show();
@@ -296,6 +309,11 @@ void setup() {
   
   //lockdown mode nothing opens it.
   static st::EX_Switch              executor2(F("switch2"), PIN_SWITCH_2, LOW, true);
+
+  static st::EX_Switch              executor3(F("switch3"), PIN_CONTACT_1, LOW, true);
+
+  //static st::IS_Contact             sensor1(F("contact1"), PIN_CONTACT_1, LOW, true, 15);
+  
   
   //*****************************************************************************
   //  Configure debug print output from each main class
@@ -304,8 +322,8 @@ void setup() {
   st::Executor::debug = true;
   st::Device::debug = true;
 
-  //st::PollingSensor::debug=true;
-  //st::InterruptSensor::debug = true;
+  st::PollingSensor::debug=true;
+  st::InterruptSensor::debug = true;
 
   //*****************************************************************************
   //Initialize the "Everything" Class
@@ -327,12 +345,14 @@ void setup() {
   //*****************************************************************************
   //Add each sensor to the "Everything" Class
   //*****************************************************************************
+  //st::Everything::addSensor(&sensor1);
 
   //*****************************************************************************
   //Add each executor to the "Everything" Class
   //*****************************************************************************
   st::Everything::addExecutor(&executor1);
   st::Everything::addExecutor(&executor2);
+  st::Everything::addExecutor(&executor3);
  
   //*****************************************************************************
   //Initialize each of the devices which were added to the Everything Class
@@ -351,7 +371,10 @@ void setup() {
   //FastLED.setBrightness(84);
   
   // initialize the book pin as an input:
-  pinMode(BOOKPIN, INPUT_PULLUP);     
+  pinMode(BOOKPIN, INPUT_PULLUP);    
+
+    // initialize the book pin as an input:
+  pinMode(PIN_CONTACT_1, INPUT_PULLUP); 
 
   // pin that sends unlock signal to mag locks when successful combination
   pinMode(UNLOCK_PIN, OUTPUT);
@@ -406,7 +429,7 @@ void loop() {
   for (int thisPin = 0; thisPin < pinCount; thisPin++) {
     int sensorState = 0; 
     
-    delay(30);
+    delay(10);
     
     sensorState = digitalRead(sensorPins[thisPin]);
 
@@ -416,7 +439,7 @@ void loop() {
         //Serial.println(next);
         if (next != -1 ) { 
           sensorStates[next] = sensorPins[thisPin];
-        } else {
+        } else if(simpleMode == 0 && lockdownMode == 0){
           failedAttempts += 1;
           String msg = "Invalid code too many, failed attempts ";
           Serial.println(msg + failedAttempts); 
@@ -467,8 +490,8 @@ void loop() {
 
           //trigger contact just before 
           st::receiveSmartString("switch3 on");
-           st::Everything::run(); // need to force smartthings to run again
-           lastDoorState = 0;
+          st::Everything::run(); // need to force smartthings to run again
+          lastDoorState = 1;
           // wait for UNLOCK_TIME seconds then lock mag locks again.
           delay(UNLOCKED_TIME);
           digitalWrite(UNLOCK_PIN, LOW);
@@ -476,7 +499,7 @@ void loop() {
           failedAttempts = 0;
           clearStates();
         
-       } else {
+       } else if (lockdownMode == 0) {
   
         failedAttempts +=1;
         String msg = " Invalid code, failed attempts ";
@@ -505,16 +528,39 @@ void loop() {
       
     }
 
+
+      if (pollingCount >= POLLING_MAX) {
+        pollingCount = 0;
       // only post smartthings event if we change state so we dont flood ST
-//      int doorState = digitalRead(PIN_CONTACT_1);  // 0 is closed 1 is open
-//      
-//      if (doorState == 0 && lastDoorState == 1) {
-//          st::receiveSmartString("switch3 off");
-//      } else if (doorState == 1 && lastDoorState == 0) {
-//        st::receiveSmartString("switch3 on");
-//      }
-//
-//      lastDoorState = doorState;
+      int doorState = digitalRead(PIN_CONTACT_1);  // 0 is closed 1 is open
+
+      String debug ="debug: ";
+      debug = debug + doorState;
+      debug = debug +",";
+      debug = debug + lastDoorState;
+      
+      Serial.println(debug);
+      
+      if (doorState == LOW && lastDoorState == 1) {
+        Serial.println("door closed");
+          st::receiveSmartString("switch3 off");
+      } else if (doorState == HIGH && lastDoorState == 0) {
+        st::receiveSmartString("switch3 on");
+        Serial.println("door opened");
+      }
+
+      lastDoorState = doorState;
+
+      debug ="debug2: ";
+      debug = debug + doorState;
+      debug = debug +",";
+      debug = debug + lastDoorState;
+      
+      Serial.println(debug);
+      }
+
+      pollingCount++;
+      
     
   int ledColor = 1;
   signalLED(ledColor);
@@ -528,7 +574,7 @@ void loop() {
 void callback(const String &msg)
 {
 
-  //Serial.println(msg.indexOf("on"));
+    Serial.println("here " + msg);
     if (msg.indexOf("switch1 on") > -1 && simpleMode == 0) {
       simpleMode = 1;
     } else if (msg.indexOf("switch2 on") > -1 && lockdownMode == 0) {
@@ -537,7 +583,12 @@ void callback(const String &msg)
       simpleMode = 0;
     } else if (msg.indexOf("switch2 off") > -1) { 
       lockdownMode = 0;
+    } else if (msg.indexOf("contact1 open") > -1 ) {
+      Serial.println(" contact open");
+    } else if (msg.indexOf("contact1 closed") > -1) {
+      Serial.println(" contact closed");
     }
+    
   //} 
     //st::receiveSmartString("switch1 off");
     //st::receiveSmartString("switch2 off");
