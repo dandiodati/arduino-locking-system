@@ -236,6 +236,20 @@ int findNextSlot(int pressed[] ) {
     FastLED.show();
   }
 
+
+ void blinkLED(CRGB color, int index) {
+        leds[index] = CRGB::Black;
+        FastLED.show();
+        delay(500);
+        
+        leds[index] = color;
+        FastLED.show();
+        delay(500);
+         leds[index] = CRGB::Black;
+        FastLED.show();
+      }
+  }
+  
   
   void signalLED(int color) {
 
@@ -439,6 +453,7 @@ void loop() {
         //Serial.println(next);
         if (next != -1 ) { 
           sensorStates[next] = sensorPins[thisPin];
+          switchSingleLED(thisPin, HIGH);
         } else if(simpleMode == 0 && lockdownMode == 0){
           failedAttempts += 1;
           String msg = "Invalid code too many, failed attempts ";
@@ -453,6 +468,7 @@ void loop() {
         lastState = sensorPins[thisPin];
      } else if (sensorState == HIGH && lastState == sensorPins[thisPin]){
       lastState = 0;
+      switchSingleLED(thisPin, LOW);
       Serial.println("Changing state to 0");
      }
 
