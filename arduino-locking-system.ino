@@ -60,8 +60,10 @@
 #define PIN_52_RESERVED          52  //reserved by W5500 Shield on MEGA
 #define PIN_53_RESERVED          53  //reserved by W5500 Shield on MEGA
 
-#define PIN_SWITCH_1              A1  //SmartThings Capability "Switch"
-#define PIN_SWITCH_2              A2  //SmartThings Capability "Switch"
+// DO we need these defined switches since they are virtual
+#define PIN_SWITCH_1              31  //SmartThings Capability "Switch"
+#define PIN_SWITCH_2              32  //SmartThings Capability "Switch"
+
 #define PIN_CONTACT_1             23  //SmartThings Capability "Contact Sensor"
 
 //******************************************************************************************
@@ -80,7 +82,7 @@ IPAddress hubIp(192, 168, 1, 51);            // smartthings hub ip              
 const unsigned int hubPort = 39500;           // smartthings hub port
 
 
-/* 
+/*
   IR Breakbeam sensor demo!
 
   https://learn.adafruit.com/ir-breakbeam-sensors/arduino
@@ -92,10 +94,10 @@ const unsigned int hubPort = 39500;           // smartthings hub port
 
 
 
-  // Pin 13: Arduino has an LED connected on pin 13
-  // Pin 11: Teensy 2.0 has the LED on pin 11
-  // Pin  6: Teensy++ 2.0 has the LED on pin 6
-  // Pin 13: Teensy 3.0 has the LED on pin 13
+// Pin 13: Arduino has an LED connected on pin 13
+// Pin 11: Teensy 2.0 has the LED on pin 11
+// Pin  6: Teensy++ 2.0 has the LED on pin 6
+// Pin 13: Teensy 3.0 has the LED on pin 13
 
 #define BOOKPIN 2
 
@@ -111,6 +113,8 @@ const unsigned int hubPort = 39500;           // smartthings hub port
 
 #define POLLING_MAX 200
 
+#define SENSOR_PROXIMITY 880
+
 //indicates the last door state only sends eventys when it changes
 // 0 closed 1 open matches highpull of reading mag contact switch
 int lastDoorState = 0;
@@ -119,26 +123,27 @@ int pollingCount = 0;
 
 
 int pinLEDS[] = {
-  11,12,14,15,16
-}; 
+  11, 12, 14, 15, 16
+};
 
 //all pins on correct order to match led lights
 int orderedSensorPins[] = {
-  5,6,7,8,9
+  A1, A2, A3, A4, A5
 };
 
 
 
 int sensorPins[] = {
-  6,5,7,8,9
+  A2, A1, A3, A4, A5
 };       // an array of pin numbers to which IR switches are attached
-         // also the combination 2,1,3,5,4
+// also the combination 2,1,3,5,4
+
 
 int sensorStates[] = {
-  0,0,0,0,0
-}; 
+  0, 0, 0, 0, 0
+};
 
-int lastState = 0;
+int lastActiveSensorPin = 0;
 int lastBookState = 0;
 
 
@@ -162,7 +167,7 @@ CRGB leds[NUM_LEDS];
 int findNextSlot(int pressed[] ) {
 
   for (int i = 0; i < pinCount; i++ ) {
-    
+
     if (pressed[i] == 0 ) {
       return i;
     }
@@ -170,114 +175,130 @@ int findNextSlot(int pressed[] ) {
   Serial.print(": returning " );
   Serial.println(-1);
   return -1;
-  
+
 }
 
-  
-  void clearStates() {
-    for (int i =0; i < (sizeof(sensorStates)/sizeof(int));i++) {
-      sensorStates[i] = 0;
-    }
- 
+void maintainDHCP() {
+  byte result = Ethernet.maintain();
+
+  if (result == 0 ) {
+   // Serial.println("DHCP Renew: NOP");
+  } else if (result == 1) {
+    Serial.println("DHCP Renew: Failed");
+  } else if (result == 2) {
+    Serial.println("DHCP Renew: Success");
+  }   else if (result == 3) {
+    Serial.println("DHCP Renew: Rebind Failed");
+  }   else if (result == 4) {
+    Serial.println("DHCP Renew: Rebind Success");
+  }
+}
+
+
+void clearStates() {
+  for (int i = 0; i < (sizeof(sensorStates) / sizeof(int)); i++) {
+    sensorStates[i] = 0;
   }
 
+}
 
 
-  /**
-   * turn on the matching LED light
-   *  type 0 indicates off
-   *  type 1 - indicates good or valid combination (green or blue)
-   *  type 2 - indicates the wrong combination (yellow)
-   *  type 3 - indicates the wrong combination (red)
-   */
-  void successLED(int success){
-    // If success is 1, make all leds green, if not, make them red.
-  
-    if (success == 1){
-      for (int index = 0; index < 5; index++){
-        leds[index] = CHSV(175, 250, 240);
-        //Green
-        //leds[index] = CHSV(79, 248, 250);
-        //Violet
-      }
+
+/**
+   turn on the matching LED light
+    type 0 indicates off
+    type 1 - indicates good or valid combination (green or blue)
+    type 2 - indicates the wrong combination (yellow)
+    type 3 - indicates the wrong combination (red)
+*/
+void changeLED(int success) {
+  // If success is 1, make all leds green, if not, make them red.
+
+  if (success == 1) {
+    for (int index = 0; index < 5; index++) {
+      leds[index] = CHSV(175, 250, 240);
+      //Green
+      //leds[index] = CHSV(79, 248, 250);
+      //Violet
+    }
     FastLED.show();
-    } else if (success == 2) {
-      flashLEDS(CHSV(221, 240, 254), 2);
-    }
-    else if(success == 3){
-      flashLEDS(CHSV(0, 255, 255), 3);
-    } else if (success == 4) {
-      flashLEDS(CHSV(79, 248, 250), 3);
-    }
-    
+  } else if (success == 2) {
+    flashLEDS(CHSV(221, 240, 254), 2);
   }
-  
-  void flashLEDS(CRGB color, int count) {
-    for (int j =0; j < count;j++ ) {
-        resetLeds();
-        FastLED.show();
-        delay(500);
-        for (int index = 0; index < NUM_LEDS; index+=1){
-          leds[index] = color;
-          //Red
-        }
-        FastLED.show();
-        delay(500);
-        
-      }
+  else if (success == 3) {
+    flashLEDS(CHSV(0, 255, 255), 3);
+  } else if (success == 4) {
+    flashLEDS(CHSV(79, 248, 250), 3);
   }
 
-  void resetLeds() {
+}
 
-    for (int i = 0; i < NUM_LEDS; i++) {
+void flashLEDS(CRGB color, int count) {
+  for (int j = 0; j < count; j++ ) {
+    resetLeds();
+    FastLED.show();
+    delay(500);
+    for (int index = 0; index < NUM_LEDS; index += 1) {
+      leds[index] = color;
+      //Red
+    }
+    FastLED.show();
+    delay(500);
+
+  }
+}
+
+void resetLeds() {
+
+  for (int i = 0; i < NUM_LEDS; i++) {
     //leds[i].nscale8(250);
     leds[i] = CRGB::Black;
   }
-    FastLED.show();
-  }
+  FastLED.show();
+}
 
-  
-  void signalLED(int color) {
+//TODO look at doing this more efficiently and within the main loop instead.
+void signalLED(int color) {
 
   for (int j = 0; j < pinCount; j++) {
     int sensorState = 0;
-     
-    sensorState = digitalRead(orderedSensorPins[j]);
-    
-    
-    if (sensorState == LOW  && color == 1 && lockdownMode == 0){
+
+    sensorState = analogRead(orderedSensorPins[j]);
+
+
+    if (sensorState <= SENSOR_PROXIMITY  && color == 1 && lockdownMode == 0) {
       if (simpleMode == 1) {
         leds[j] = CHSV(175, 250, 240); //green
       } else {
-      //Blue
-      leds[j] = CHSV(122, 230, 255); //blue
+        //Blue
+        leds[j] = CHSV(122, 230, 255); //blue
       }
-      
+
     } else {
       leds[j] = CHSV(255, 0, 0);
     }
-//    else if (sensorState == LOW && color == 2){
-//      //Green
-//      leds[j] = CHSV(175, 250, 240);
-//    }
-//    else if (sensorState == LOW && color == 3){
-//      //Yellow
-//      leds[j] = CHSV(221, 240, 254);
-//    }
-//    else if(sensorState == LOW && color == 4){
-//      //Orange
-//      leds[j] = CHSV(243, 240, 240);
-//    }
-//    else if(sensorState == LOW && color == 5) {
-//      //Violet
-//      leds[j] = CHSV(79, 248, 250);
-//    }
-    
+    //    else if (sensorState == LOW && color == 2){
+    //      //Green
+    //      leds[j] = CHSV(175, 250, 240);
+    //    }
+    //    else if (sensorState == LOW && color == 3){
+    //      //Yellow
+    //      leds[j] = CHSV(221, 240, 254);
+    //    }
+    //    else if(sensorState == LOW && color == 4){
+    //      //Orange
+    //      leds[j] = CHSV(243, 240, 240);
+    //    }
+    //    else if(sensorState == LOW && color == 5) {
+    //      //Violet
+    //      leds[j] = CHSV(79, 248, 250);
+    //    }
+
   }
-    
+
   FastLED.show();
- 
-  }
+
+}
 
 
 
@@ -285,7 +306,7 @@ int findNextSlot(int pressed[] ) {
 
 void setup() {
 
-    //******************************************************************************************
+  //******************************************************************************************
   //  ST_Anything setup
   //Declare each Device that is attached to the Arduino
   //  Notes: - For each device, there is typically a corresponding "tile" defined in your
@@ -306,15 +327,15 @@ void setup() {
   //Executors
   //simple mode (book always opens
   static st::EX_Switch              executor1(F("switch1"), PIN_SWITCH_1, LOW, true);
-  
+
   //lockdown mode nothing opens it.
   static st::EX_Switch              executor2(F("switch2"), PIN_SWITCH_2, LOW, true);
 
   static st::EX_Switch              executor3(F("switch3"), PIN_CONTACT_1, LOW, true);
 
   //static st::IS_Contact             sensor1(F("contact1"), PIN_CONTACT_1, LOW, true, 15);
-  
-  
+
+
   //*****************************************************************************
   //  Configure debug print output from each main class
   //*****************************************************************************
@@ -322,7 +343,7 @@ void setup() {
   st::Executor::debug = true;
   st::Device::debug = true;
 
-  st::PollingSensor::debug=false;
+  st::PollingSensor::debug = false;
   st::InterruptSensor::debug = false;
 
   //*****************************************************************************
@@ -338,6 +359,7 @@ void setup() {
 
   //DHCP IP Assigment - Must set your router's DHCP server to provice a static IP address for this device's MAC address
   st::Everything::SmartThing = new st::SmartThingsEthernetW5100(mac, serverPort, hubIp, hubPort, st::receiveSmartString);
+  //st::Everything::SmartThing = new st::SmartThingsEthernetW5100(mac, serverPort, hubIp, hubPort, st::receiveSmartString,"EthernetShield",true,100);
 
   //Run the Everything class' init() routine which establishes Ethernet communications with the SmartThings Hub
   st::Everything::init();
@@ -353,33 +375,33 @@ void setup() {
   st::Everything::addExecutor(&executor1);
   st::Everything::addExecutor(&executor2);
   st::Everything::addExecutor(&executor3);
- 
+
   //*****************************************************************************
   //Initialize each of the devices which were added to the Everything Class
   //*****************************************************************************
   st::Everything::initDevices();
-  
-  
+
+
   //******************************************************************************************
   //  FASTLED setup
   //******************************************************************************************
   // sanity check delay - allows reprogramming if accidently blowing power w/leds
   delay(1000);
- 
+
   FastLED.addLeds<TM1803, DATA_PIN, RGB>(leds, NUM_LEDS);
 
   //FastLED.setBrightness(84);
-  
-  // initialize the book pin as an input:
-  pinMode(BOOKPIN, INPUT_PULLUP);    
 
-    // initialize the book pin as an input:
-  pinMode(PIN_CONTACT_1, INPUT_PULLUP); 
+  // initialize the book pin as an input:
+  pinMode(BOOKPIN, INPUT_PULLUP);
+
+  // initialize the book pin as an input:
+  pinMode(PIN_CONTACT_1, INPUT_PULLUP);
 
   // pin that sends unlock signal to mag locks when successful combination
   pinMode(UNLOCK_PIN, OUTPUT);
-  
-  //Serial.begin(115200); 
+
+  //Serial.begin(115200);
   // the array elements are numbered from 0 to (pinCount - 1).
   // use a for loop to initialize each pin as an output:
   for (int thisPin = 0; thisPin < pinCount; thisPin++) {
@@ -390,181 +412,206 @@ void setup() {
   }
 
   printState();
-  successLED(1);
+  changeLED(1);
 
 }
 
 void printState() {
-      Serial.println("states:");
-   for (int thisPin = 0; thisPin < pinCount; thisPin++) {
-      Serial.print("Pin Count ");
-      Serial.print(thisPin);
-      Serial.print(",source pin ");
-      Serial.print(sensorPins[thisPin]);
-      Serial.print(" = "); 
-      Serial.println(digitalRead(sensorPins[thisPin]));
-   }
+  Serial.println("INFO: states:");
+  for (int thisPin = 0; thisPin < pinCount; thisPin++) {
+    Serial.print("Pin Count ");
+    Serial.print(thisPin);
+    Serial.print(",source pin ");
+    Serial.print(orderedSensorPins[thisPin]);
+    Serial.print(" = ");
+    Serial.println(analogRead(orderedSensorPins[thisPin]));
+  }
 
-      Serial.print("BOOK PIN STATE:");
-      Serial.println(digitalRead(BOOKPIN));
-  
-    Serial.print("Sensors Read: ");
-    for (int thisPin = 0; thisPin < pinCount-1; thisPin++) {
-      Serial.print (sensorStates[thisPin]);
-      Serial.print(",");
-    }
-    Serial.println(sensorStates[pinCount-1]);
+  Serial.print("BOOK PIN STATE:");
+  Serial.println(digitalRead(BOOKPIN));
+
+  Serial.print("Sensors Read: ");
+  for (int thisPin = 0; thisPin < pinCount - 1; thisPin++) {
+    Serial.print (sensorStates[thisPin]);
+    Serial.print(",");
+  }
+  Serial.println(sensorStates[pinCount - 1]);
 }
 
 void loop() {
 
-  
+  //maintain dhcp with debug logging.
+  //maintainDHCP();
+
   //*****************************************************************************
   //Execute the Everything run method which takes care of "Everything"
   //*****************************************************************************
   st::Everything::run();
 
-    
+
   // loop from the lowest pin to the highest:
   for (int thisPin = 0; thisPin < pinCount; thisPin++) {
-    int sensorState = 0; 
-    
+    int sensorValue = 0;
+
     delay(10);
-    
-    sensorState = digitalRead(sensorPins[thisPin]);
-
-     if (sensorState == LOW && lastState == 0  ) {
-        int next = findNextSlot(sensorStates);
-        //Serial.print("debug: ");
-        //Serial.println(next);
-        if (next != -1 ) { 
-          sensorStates[next] = sensorPins[thisPin];
-        } else if(simpleMode == 0 && lockdownMode == 0){
-          failedAttempts += 1;
-          String msg = "Invalid code too many, failed attempts ";
-          Serial.println(msg + failedAttempts); 
-          successLED(2);
-          clearStates();
-          //blink(2);
-        }
-
-        printState();
-
-        lastState = sensorPins[thisPin];
-     } else if (sensorState == HIGH && lastState == sensorPins[thisPin]){
-      lastState = 0;
-      Serial.println("Changing state to 0");
-     }
-
-  }
-     int bookState = digitalRead(BOOKPIN);
-
-     if (bookState == HIGH && lastBookState == 0) {
-       
-      int i = 0;
-      int valid = 1;
-    
-      while (valid == 1 && i < pinCount) {
-
-        if(sensorStates[i] != sensorPins[i]) {
-        valid = 0;
-        } 
-        i += 1;
-     
-       } 
-
-       if (lockdownMode == 1 ) {
-         clearStates();
-         String msg = "In lockdown mode";
-         Serial.println(msg);
-         successLED(4);
-         failedAttempts = 0;
-         resetLeds();
-       } else if (simpleMode == 1 || (findNextSlot(sensorStates) == -1 && valid) ) {
-       
-          // turn the pin on:
-          //blink(1);
-          Serial.println("Got the code unlocked !!!");
-          digitalWrite(UNLOCK_PIN, HIGH);
-          successLED(1);
-
-          //trigger contact just before 
-          st::receiveSmartString("switch3 on");
-          st::Everything::run(); // need to force smartthings to run again
-          lastDoorState = 1;
-          // wait for UNLOCK_TIME seconds then lock mag locks again.
-          delay(UNLOCKED_TIME);
-          digitalWrite(UNLOCK_PIN, LOW);
-          resetLeds();
-          failedAttempts = 0;
-          clearStates();
-        
-       } else if (lockdownMode == 0) {
-  
-        failedAttempts +=1;
-        String msg = " Invalid code, failed attempts ";
-        
-        
-        Serial.println(msg + failedAttempts);
-        clearStates();
-        successLED(2);
-        
-        //blink(2);
-       }
-     }
-
-     lastBookState = bookState;
-     
-
-    if (failedAttempts >= MAX_FAILED) {
-      //blink(3);
-      clearStates();
-      String msg = "Max attempts lockout occured ";
-      Serial.println(msg + failedAttempts);
-      successLED(3);
-      delay(LOCKOUT_TIME); // lock time 5 minutes
-      failedAttempts = 0;
-      resetLeds();
+ 
+    sensorValue = analogRead(sensorPins[thisPin]);
+ 
+//      String msg = "Looping over sensors: ";
+//      msg = msg + "Checking index: ";
+//      msg = msg + thisPin;
+//      msg = msg + ", current pin#:";
+//      msg = msg + sensorPins[thisPin];
+//      msg = msg + ", last active pin:";
+//      msg = msg + lastActiveSensorPin;
+//      msg = msg +", Sensor value:";
+//      msg = msg + sensorValue;
+//      Serial.println(msg);
       
+   
+
+    if (sensorValue <= SENSOR_PROXIMITY && lastActiveSensorPin == 0 ) {
+      int next = findNextSlot(sensorStates);
+      //Serial.print("debug: ");
+      //Serial.println(next);
+      if (next != -1 ) {
+        sensorStates[next] = sensorPins[thisPin];
+      } else if (simpleMode == 0 && lockdownMode == 0) {
+        failedAttempts += 1;
+        String msg = "Invalid code, too many failed attempts ";
+        Serial.println(msg + failedAttempts);
+        changeLED(2);
+        clearStates();
+        //blink(2);
+      }
+
+      printState();
+
+      lastActiveSensorPin = sensorPins[thisPin];
+    } else if (sensorValue > SENSOR_PROXIMITY && lastActiveSensorPin == sensorPins[thisPin]) {
+      
+      String msg = "Resting active pin to 0, Sensor value:";
+      msg = msg + sensorValue;
+      msg = msg + ", Checking pin#: ";
+      msg = msg + thisPin;
+      msg = msg + ", last active pin:";
+      msg = msg + lastActiveSensorPin;
+      msg = msg + ", current pin:";
+      msg = msg + sensorPins[thisPin];
+      Serial.println(msg);
+      lastActiveSensorPin = 0;
     }
 
+  }
+  
+  int bookState = digitalRead(BOOKPIN);
 
-      if (pollingCount >= POLLING_MAX) {
-        pollingCount = 0;
-      // only post smartthings event if we change state so we dont flood ST
-      int doorState = digitalRead(PIN_CONTACT_1);  // 0 is closed 1 is open
+  if (bookState == HIGH && lastBookState == 0) {
 
-      String debug ="debug: ";
-      debug = debug + doorState;
-      debug = debug +",";
-      debug = debug + lastDoorState;
-      
-      Serial.println(debug);
-      
-      if (doorState == LOW && lastDoorState == 1) {
-        Serial.println("door closed");
-          st::receiveSmartString("switch3 off");
-      } else if (doorState == HIGH && lastDoorState == 0) {
-        st::receiveSmartString("switch3 on");
-        Serial.println("door opened");
+    int i = 0;
+    int valid = 1;
+
+    while (valid == 1 && i < pinCount) {
+
+      if (sensorStates[i] != sensorPins[i]) {
+        valid = 0;
       }
+      i += 1;
 
-      lastDoorState = doorState;
+    }
 
-      debug ="debug2: ";
-      debug = debug + doorState;
-      debug = debug +",";
-      debug = debug + lastDoorState;
-      
-      Serial.println(debug);
-      }
+    if (lockdownMode == 1 ) {
+      clearStates();
+      String msg = "In lockdown mode";
+      Serial.println(msg);
+      changeLED(4);
+      failedAttempts = 0;
+      resetLeds();
+    } else if (simpleMode == 1 || (findNextSlot(sensorStates) == -1 && valid) ) {
 
-      pollingCount++;
-      
-    
+      // turn the pin on:
+      //blink(1);
+      Serial.println("Got the code unlocked !!!");
+      digitalWrite(UNLOCK_PIN, HIGH);
+      changeLED(1);
+
+      //trigger contact just before
+      st::receiveSmartString("switch3 on");
+      st::Everything::run(); // need to force smartthings to run again
+      lastDoorState = 1;
+      // wait for UNLOCK_TIME seconds then lock mag locks again.
+      delay(UNLOCKED_TIME);
+      digitalWrite(UNLOCK_PIN, LOW);
+      resetLeds();
+      failedAttempts = 0;
+      clearStates();
+
+    } else if (lockdownMode == 0) {
+
+      failedAttempts += 1;
+      String msg = " Invalid code, failed attempts ";
+
+
+      Serial.println(msg + failedAttempts);
+      clearStates();
+      changeLED(2);
+
+      //blink(2);
+    }
+  }
+
+  lastBookState = bookState;
+
+
+  if (failedAttempts >= MAX_FAILED) {
+    //blink(3);
+    clearStates();
+    String msg = "Max attempts lockout occured ";
+    Serial.println(msg + failedAttempts);
+    changeLED(3);
+    delay(LOCKOUT_TIME); // lock time 5 minutes
+    failedAttempts = 0;
+    resetLeds();
+
+  }
+
+
+  if (pollingCount >= POLLING_MAX) {
+    pollingCount = 0;
+    // only post smartthings event if we change state so we dont flood ST
+    int doorState = digitalRead(PIN_CONTACT_1);  // 0 is closed 1 is open
+
+    String debug = "debug: ";
+    debug = debug + doorState;
+    debug = debug + ",";
+    debug = debug + lastDoorState;
+
+    Serial.println(debug);
+
+    if (doorState == LOW && lastDoorState == 1) {
+      Serial.println("door closed");
+      st::receiveSmartString("switch3 off");
+    } else if (doorState == HIGH && lastDoorState == 0) {
+      st::receiveSmartString("switch3 on");
+      Serial.println("door opened");
+    }
+
+    lastDoorState = doorState;
+
+    debug = "debug doorstate: ";
+    debug = debug + doorState;
+    debug = debug + ",";
+    debug = debug + lastDoorState;
+
+    Serial.println(debug);
+  }
+
+  pollingCount++;
+
+
   int ledColor = 1;
   signalLED(ledColor);
-  }
+}
 
 //******************************************************************************************
 //st::Everything::callOnMsgSend() optional callback routine.  This is a sniffer to monitor
@@ -574,26 +621,26 @@ void loop() {
 void callback(const String &msg)
 {
 
-    Serial.println("here " + msg);
-    if (msg.indexOf("switch1 on") > -1 && simpleMode == 0) {
-      simpleMode = 1;
-    } else if (msg.indexOf("switch2 on") > -1 && lockdownMode == 0) {
-      lockdownMode = 1; 
-    }  else if (msg.indexOf("switch1 off") > -1) { 
-      simpleMode = 0;
-    } else if (msg.indexOf("switch2 off") > -1) { 
-      lockdownMode = 0;
-    } else if (msg.indexOf("contact1 open") > -1 ) {
-      Serial.println(" contact open");
-    } else if (msg.indexOf("contact1 closed") > -1) {
-      Serial.println(" contact closed");
-    }
-    
-  //} 
-    //st::receiveSmartString("switch1 off");
-    //st::receiveSmartString("switch2 off");
+  Serial.println("here " + msg);
+  if (msg.indexOf("switch1 on") > -1 && simpleMode == 0) {
+    simpleMode = 1;
+  } else if (msg.indexOf("switch2 on") > -1 && lockdownMode == 0) {
+    lockdownMode = 1;
+  }  else if (msg.indexOf("switch1 off") > -1) {
+    simpleMode = 0;
+  } else if (msg.indexOf("switch2 off") > -1) {
+    lockdownMode = 0;
+  } else if (msg.indexOf("contact1 open") > -1 ) {
+    Serial.println(" contact open");
+  } else if (msg.indexOf("contact1 closed") > -1) {
+    Serial.println(" contact closed");
+  }
 
-   //Uncomment if it weould be desirable to using this function
+  //}
+  //st::receiveSmartString("switch1 off");
+  //st::receiveSmartString("switch2 off");
+
+  //Uncomment if it weould be desirable to using this function
   //Serial.print(F("ST_Anything_Miltiples Callback: Sniffed data = "));
 
 
@@ -605,4 +652,3 @@ void callback(const String &msg)
   //st::receiveSmartString("Put your command here!");  //use same strings that the Device Handler would send
 
 }
-  
