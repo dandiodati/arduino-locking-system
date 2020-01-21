@@ -1,4 +1,4 @@
-#include <noise.h>
+ #include <noise.h>
 #include <bitswap.h>
 #include <fastspi_types.h>
 #include <pixelset.h>
@@ -78,8 +78,8 @@ IPAddress subnet(255, 255, 255, 0);           //LAN sceubnet mask               
 const unsigned int serverPort = 8090;         // port to run the http server on
 
 /// Smartthings hub information
-IPAddress hubIp(192, 168, 1, 51);            // smartthings hub ip                         //  <---You must edit this line!
-const unsigned int hubPort = 39500;           // smartthings hub port
+IPAddress hubIp(192, 168, 1, 51);            // hubitat hub ip                         //  <---You must edit this line!
+const unsigned int hubPort = 39501;           // hubitat hub port
 
 
 /*
@@ -331,10 +331,10 @@ void setup() {
   //lockdown mode nothing opens it.
   static st::EX_Switch              executor2(F("switch2"), PIN_SWITCH_2, LOW, true);
 
-  static st::EX_Switch              executor3(F("switch3"), PIN_CONTACT_1, LOW, true);
+  //static st::EX_Switch              executor3(F("switch3"), PIN_CONTACT_1, LOW, true);
 
   //static st::IS_Contact             sensor1(F("contact1"), PIN_CONTACT_1, LOW, true, 15);
-
+  static st::IS_Contact             sensor1(F("contact1"), PIN_CONTACT_1, LOW, true);
 
   //*****************************************************************************
   //  Configure debug print output from each main class
@@ -367,14 +367,14 @@ void setup() {
   //*****************************************************************************
   //Add each sensor to the "Everything" Class
   //*****************************************************************************
-  //st::Everything::addSensor(&sensor1);
+  st::Everything::addSensor(&sensor1);
 
   //*****************************************************************************
   //Add each executor to the "Everything" Class
   //*****************************************************************************
   st::Everything::addExecutor(&executor1);
   st::Everything::addExecutor(&executor2);
-  st::Everything::addExecutor(&executor3);
+  //st::Everything::addExecutor(&executor3);
 
   //*****************************************************************************
   //Initialize each of the devices which were added to the Everything Class
@@ -395,8 +395,8 @@ void setup() {
   // initialize the book pin as an input:
   pinMode(BOOKPIN, INPUT_PULLUP);
 
-  // initialize the book pin as an input:
-  pinMode(PIN_CONTACT_1, INPUT_PULLUP);
+  // initialize the contact senor pin as an input:
+  //pinMode(PIN_CONTACT_1, INPUT_PULLUP);
 
   // pin that sends unlock signal to mag locks when successful combination
   pinMode(UNLOCK_PIN, OUTPUT);
@@ -652,3 +652,17 @@ void callback(const String &msg)
   //st::receiveSmartString("Put your command here!");  //use same strings that the Device Handler would send
 
 }
+
+
+//******************************************************************************************
+//st::Everything::callOnMsgRcvd2() optional callback routine.  This is a sniffer to monitor 
+//    data being received from ST.  This allows a user to act on data changes locally within the 
+//    Arduino sktech before ST_Anything processes the command.
+//******************************************************************************************
+//void callbackRcvd2(String &msg)
+//{
+  //Switch 2 can only be turned on when Switch 1 is already turned ON.
+ // if (msg == "switch2 on") {
+ //   msg = switch1->getStatus()== HIGH?"switch2 on":"switch2 off";
+ // }
+//}
