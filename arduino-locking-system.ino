@@ -107,11 +107,14 @@ const unsigned int hubPort = 39501;           // hubitat hub port
 
 
 // if successful indicates how long the lock will remain unlocked allowing people to enter.
-// defaults to 30 secs
+// defaults to 10 secs
 #define UNLOCKED_TIME 10000
 
+unsigned long currentMillis = 0;    // stores the value of millis() in each iteration of loop()
+unsigned long unlockedTimeMillis = 0;   // will store last updated time
 
-#define POLLING_MAX 200
+
+//#define POLLING_MAX 200
 
 #define SENSOR_PROXIMITY 880
 
@@ -119,6 +122,8 @@ const unsigned int hubPort = 39501;           // hubitat hub port
 // 0 closed 1 open matches highpull of reading mag contact switch
 int lastDoorState = 0;
 int pollingCount = 0;
+
+int doorOpen = 0;
 
 
 
@@ -414,6 +419,10 @@ void setup() {
   printState();
   changeLED(1);
 
+  delay(1000);
+
+  resetLeds();
+
 }
 
 void printState() {
@@ -443,13 +452,123 @@ void loop() {
   //maintain dhcp with debug logging.
   //maintainDHCP();
 
+ currentMillis = millis();   // capture the latest value of millis()
+                             //   this is equivalent to noting the time from a clock
+                             
   //*****************************************************************************
   //Execute the Everything run method which takes care of "Everything"
   //*****************************************************************************
   st::Everything::run();
 
+  int doorLocked = checkDoorUnlockedTimer();
 
-  // loop from the lowest pin to the highest:
+    if(!doorOpen && doorLocked) { // if locked enabled again but only scan if door is closed otherwise skip scanning sensors until door is closed 
+      //trying out door open based on contact sensor not sure if it works though.
+      doorLocked = checkBookState();  // will return false if door is unlocked and within the UNLOCKED_TIME
+
+      if(doorLocked) { // skip all other processing if we are in an unlocked state
+         lookForSensorActivity();
+
+         int ledColor = 1;
+         signalLED(ledColor); 
+      }
+    }
+
+}
+
+//will loop until UNLOCKED_TIME has passed then will turn on the magnetic lock and return true,
+int checkDoorUnlockedTimer() {
+  if (unlockedTimeMillis !=0) {
+    if(currentMillis - unlockedTimeMillis <= UNLOCKED_TIME) {
+      Serial.print("Door open for ");
+      Serial.print(currentMillis - unlockedTimeMillis);
+      Serial.println(" milliseconds");
+       return 0;
+    } else {
+      // wait for UNLOCK_TIME seconds then lock mag locks again.
+      //delay(UNLOCKED_TIME);
+      digitalWrite(UNLOCK_PIN, LOW);
+      resetLeds();
+      failedAttempts = 0;
+      clearStates();
+      unlockedTimeMillis = 0;
+    }
+  }
+
+  return 1;
+  
+}
+
+int checkBookState() {
+
+  int bookState = digitalRead(BOOKPIN);
+
+  if (bookState == HIGH && lastBookState == 0) {
+
+    int i = 0;
+    int valid = 1;
+
+    while (valid == 1 && i < pinCount) {
+
+      if (sensorStates[i] != sensorPins[i]) {
+        valid = 0;
+      }
+      i += 1;
+
+    }
+
+    if (lockdownMode == 1 ) {
+      clearStates();
+      String msg = "In lockdown mode";
+      Serial.println(msg);
+      changeLED(4);
+      failedAttempts = 0;
+      resetLeds();
+    } else if (simpleMode == 1 || (findNextSlot(sensorStates) == -1 && valid) ) {
+
+      // turn the pin on:
+      //blink(1);
+      Serial.println("Got the code unlocked !!!");
+      digitalWrite(UNLOCK_PIN, HIGH);
+      changeLED(1);
+
+      lastDoorState = 1;
+      unlockedTimeMillis = currentMillis;
+      return 0;
+    } else if (lockdownMode == 0) {
+
+      failedAttempts += 1;
+      String msg = " Invalid code, failed attempts ";
+
+      Serial.println(msg + failedAttempts);
+      clearStates();
+      changeLED(2);
+
+      //blink(2);
+    }
+  }
+
+  lastBookState = bookState;
+
+
+  if (failedAttempts >= MAX_FAILED) {
+    //blink(3);
+    clearStates();
+    String msg = "Max attempts lockout occured ";
+    Serial.println(msg + failedAttempts);
+    changeLED(3);
+    delay(LOCKOUT_TIME); // lock time 5 minutes
+    failedAttempts = 0;
+    resetLeds();
+
+  }
+
+  return 1;
+}
+
+
+void lookForSensorActivity() {
+// loop from the lowest pin to the highest:
   for (int thisPin = 0; thisPin < pinCount; thisPin++) {
     int sensorValue = 0;
 
@@ -504,113 +623,6 @@ void loop() {
 
   }
   
-  int bookState = digitalRead(BOOKPIN);
-
-  if (bookState == HIGH && lastBookState == 0) {
-
-    int i = 0;
-    int valid = 1;
-
-    while (valid == 1 && i < pinCount) {
-
-      if (sensorStates[i] != sensorPins[i]) {
-        valid = 0;
-      }
-      i += 1;
-
-    }
-
-    if (lockdownMode == 1 ) {
-      clearStates();
-      String msg = "In lockdown mode";
-      Serial.println(msg);
-      changeLED(4);
-      failedAttempts = 0;
-      resetLeds();
-    } else if (simpleMode == 1 || (findNextSlot(sensorStates) == -1 && valid) ) {
-
-      // turn the pin on:
-      //blink(1);
-      Serial.println("Got the code unlocked !!!");
-      digitalWrite(UNLOCK_PIN, HIGH);
-      changeLED(1);
-
-      //trigger contact just before
-      st::receiveSmartString("switch3 on");
-      st::Everything::run(); // need to force smartthings to run again
-      lastDoorState = 1;
-      // wait for UNLOCK_TIME seconds then lock mag locks again.
-      delay(UNLOCKED_TIME);
-      digitalWrite(UNLOCK_PIN, LOW);
-      resetLeds();
-      failedAttempts = 0;
-      clearStates();
-
-    } else if (lockdownMode == 0) {
-
-      failedAttempts += 1;
-      String msg = " Invalid code, failed attempts ";
-
-
-      Serial.println(msg + failedAttempts);
-      clearStates();
-      changeLED(2);
-
-      //blink(2);
-    }
-  }
-
-  lastBookState = bookState;
-
-
-  if (failedAttempts >= MAX_FAILED) {
-    //blink(3);
-    clearStates();
-    String msg = "Max attempts lockout occured ";
-    Serial.println(msg + failedAttempts);
-    changeLED(3);
-    delay(LOCKOUT_TIME); // lock time 5 minutes
-    failedAttempts = 0;
-    resetLeds();
-
-  }
-
-
-  if (pollingCount >= POLLING_MAX) {
-    pollingCount = 0;
-    // only post smartthings event if we change state so we dont flood ST
-    int doorState = digitalRead(PIN_CONTACT_1);  // 0 is closed 1 is open
-
-    String debug = "debug: ";
-    debug = debug + doorState;
-    debug = debug + ",";
-    debug = debug + lastDoorState;
-
-    Serial.println(debug);
-
-    if (doorState == LOW && lastDoorState == 1) {
-      Serial.println("door closed");
-      st::receiveSmartString("switch3 off");
-    } else if (doorState == HIGH && lastDoorState == 0) {
-      st::receiveSmartString("switch3 on");
-      Serial.println("door opened");
-    }
-
-    lastDoorState = doorState;
-
-    debug = "debug doorstate: ";
-    debug = debug + doorState;
-    debug = debug + ",";
-    debug = debug + lastDoorState;
-
-    Serial.println(debug);
-  }
-
-  pollingCount++;
-
-
-  int ledColor = 1;
-  signalLED(ledColor);
 }
 
 //******************************************************************************************
@@ -632,8 +644,10 @@ void callback(const String &msg)
     lockdownMode = 0;
   } else if (msg.indexOf("contact1 open") > -1 ) {
     Serial.println(" contact open");
+    doorOpen = 1;
   } else if (msg.indexOf("contact1 closed") > -1) {
     Serial.println(" contact closed");
+    doorOpen = 0;
   }
 
   //}
